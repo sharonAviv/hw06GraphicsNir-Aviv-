@@ -420,6 +420,26 @@ let   spinAxis   = new THREE.Vector3(1,0,0);   // arbitrary non-zero default
 let   spinSpeed  = 0;                          // rad / s  (signed)
 const MIN_SPEED  = 0.05;                       // m/s →  no visible roll
 
+/* ── Phase-6 scoring state ────────────────────────────────────────── */
+let totalScore    = 0;
+let shotAttempts  = 0;
+let shotsMade     = 0;
+let shotEvaluated = false;   // per-shot flag
+// track arc-crossing per shot
+let shotPassedRimPlane = false;  // becomes true once centre rises above rim
+let targetRimY         = 0;      // the rim-plane Y for this shot
+
+// --- team scoring + 3pt detection ---
+let homeScore = 0;
+let awayScore = 0;
+
+const THREE_PT_RADIUS = 6;   // same value you use to draw the arc【:contentReference[oaicite:1]{index=1}】
+const THREE_PT_EPS    = 0.05;   // tiny tolerance
+
+// store info at launch time
+const shotStartPos  = new THREE.Vector3();
+let   shotTargetRim = null;
+
 function syncSpinWithVelocity(v){
   const speed = v.length();
   if (speed < MIN_SPEED) return;               // nothing to do
@@ -442,7 +462,41 @@ function reflectVelocity(v, normal, restitution){
 }
 
 // === extra UI hooks ===
-const scoreBox   = document.getElementById('score-ui');
+let scoreBox = document.getElementById('score-ui');
+if (!scoreBox){                               // create it if it wasn’t in HTML
+  scoreBox           = document.createElement('div');
+  scoreBox.id        = 'score-ui';
+  scoreBox.style.cssText = `
+      position:absolute; top:15px; right:20px;
+      background:rgba(0,0,0,0.55); color:#fff;
+      padding:12px 16px; border-radius:8px;
+      font-family:Arial, sans-serif; font-size:15px;
+  `;
+  Object.assign(scoreBox.style, {
+  top        : '80px',      // ↓ push below the clock/period board
+  left       : '50%',       // ⬅ center horizontally
+  right      : 'auto',
+  transform  : 'translateX(-50%)',
+  textAlign  : 'center'
+  });
+  document.body.appendChild(scoreBox);
+}
+
+/* scoreboard layout --------------------------------------------------- */
+scoreBox.innerHTML = `
+  <h3 style="margin:0 0 6px 0;">Scoreboard</h3>
+  Attempts: <span id="score-attempts">0</span> &nbsp; | &nbsp;
+  Made: <span id="score-makes">0</span> &nbsp; | &nbsp;
+  Accuracy: <span id="score-pct">0%</span><br>
+  <span id="shot-message"
+        style="display:block;margin-top:6px;font-weight:bold;"></span>
+`;
+const homeEl     = document.getElementById('home-score');
+const awayEl     = document.getElementById('away-score');
+const attemptsEl = document.getElementById('score-attempts');
+const makesEl    = document.getElementById('score-makes');
+const pctEl      = document.getElementById('score-pct');
+const messageEl  = document.getElementById('shot-message');
 const controlsUI = document.getElementById('controls-ui');
 const orbitText  = document.getElementById('orbit-status');
 
@@ -488,6 +542,11 @@ function shootBall(){
   const target = hoopRims.reduce((closest, rim) =>
     ball.position.distanceTo(rim.position) <
     ball.position.distanceTo(closest.position) ? rim : closest);
+    shotStartPos.copy(ball.position);
+    shotTargetRim = target;
+    // store rim height for arc test
+    targetRimY         = target.position.y;
+    shotPassedRimPlane = false;
 
   /* ----  build initial velocity  ----------------------------------- */
   const vTot   = currentShotVelocity();   // uses Phase-2 shotPower
@@ -502,9 +561,13 @@ function shootBall(){
 
   vel.copy(horDir).multiplyScalar(vHor);
   vel.y = vVert;
+  shotAttempts++;
+  updateScoreUI();
+  shotEvaluated = false;
 
   inFlight = true;
   syncSpinWithVelocity(vel);   // start spin immediately
+  shotPassedRimPlane = false
 
 }
 
@@ -574,6 +637,11 @@ function handleGroundCollision(){
       spinSpeed = 0;
       inFlight = false;
     }
+
+    if (!shotEvaluated){
+      shotEvaluated = true;
+      showMessage('MISSED SHOT', '#ff4040');
+    }
   }
 }
 
@@ -612,6 +680,70 @@ function handleBackboardCollision(){
   }
 }
 
+function updateScoreUI(){
+  // keep totalScore for other uses
+  totalScore = homeScore + awayScore;
+
+  homeEl.textContent     = homeScore;
+  awayEl.textContent     = awayScore;
+  attemptsEl.textContent = shotAttempts;
+  makesEl.textContent    = shotsMade;
+  pctEl.textContent      = shotAttempts
+    ? ((shotsMade / shotAttempts * 100).toFixed(1) + '%')
+    : '0%';
+}
+
+function showMessage(txt, color){
+  messageEl.textContent = txt;
+  messageEl.style.color = color || '#ffd700';
+  messageEl.style.opacity = '1';
+  setTimeout(()=>{ messageEl.style.opacity='0'; }, 1500);
+}
+
+function checkScore(){
+  // only evaluate once and only when descending
+  if (shotEvaluated || vel.y >= 0) return;
+
+  for (const rim of hoopRims){
+    const planeY = rim.position.y;
+
+    // wait until centre is clearly below rim plane
+    if (ball.position.y > planeY - RADIUS) continue;
+
+    // horizontal distance from rim centre = “through the hole” test
+    const dx = ball.position.x - rim.position.x;
+    const dz = ball.position.z - rim.position.z;
+    const dist = Math.hypot(dx, dz);
+
+    const innerR = rim.geometry.parameters.radius -
+                   rim.geometry.parameters.tube;    // ring inner radius
+    const crossed = shotPassedRimPlane &&
+                    ball.position.y < rim.position.y - RADIUS;
+
+    if (crossed && dist < innerR){
+      // --- determine team (left hoop = HOME) ---
+      const isHome = rim.position.x < 0;
+
+      // --- 2 or 3 points? measure at launch ---
+      const startDx = shotStartPos.x - rim.position.x;
+      const startDz = shotStartPos.z - rim.position.z;
+      const startDist = Math.hypot(startDx, startDz);
+      const pts = (startDist > THREE_PT_RADIUS + THREE_PT_EPS) ? 3 : 2;
+
+      if (isHome) homeScore += pts; else awayScore += pts;
+      totalScore += pts;
+      shotsMade  += 1;
+
+      shotEvaluated = true;
+      updateScoreUI();
+      showMessage(`${isHome ? 'HOME' : 'AWAY'} ${pts}PT!`, '#40ff40');
+      return;
+    }
+  }
+}
+
+
+
 // // Animation loop
 // function animate() {
 //   requestAnimationFrame(animate);
@@ -640,6 +772,10 @@ if (inFlight) {
     const angle = spinSpeed * dt;                // Δθ
     ball.rotateOnWorldAxis(spinAxis, -angle);
   }
+  if (!shotPassedRimPlane && ball.position.y > targetRimY + RADIUS) {
+  shotPassedRimPlane = true;
+  }
+  checkScore();
   // rim collision (before ground so we don't miss hits)
   handleRimCollision();
   
