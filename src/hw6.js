@@ -425,6 +425,8 @@ let totalScore    = 0;
 let shotAttempts  = 0;
 let shotsMade     = 0;
 let shotEvaluated = false;   // per-shot flag
+let streakCount  = 0;           // 0 = no active streak
+let streakBasket = null;        // 'home' | 'away
 // track arc-crossing per shot
 let shotPassedRimPlane = false;  // becomes true once centre rises above rim
 let targetRimY         = 0;      // the rim-plane Y for this shot
@@ -488,6 +490,8 @@ scoreBox.innerHTML = `
   Attempts: <span id="score-attempts">0</span> &nbsp; | &nbsp;
   Made: <span id="score-makes">0</span> &nbsp; | &nbsp;
   Accuracy: <span id="score-pct">0%</span><br>
+  <br>
+  Streak: <span id="score-streak">0</span>
   <span id="shot-message"
         style="display:block;margin-top:6px;font-weight:bold;"></span>
 `;
@@ -499,6 +503,7 @@ const pctEl      = document.getElementById('score-pct');
 const messageEl  = document.getElementById('shot-message');
 const controlsUI = document.getElementById('controls-ui');
 const orbitText  = document.getElementById('orbit-status');
+const streakEl   = document.getElementById('score-streak');
 
 // update orbit status without touching old instructionsElement
 document.addEventListener('keydown', e => {
@@ -641,6 +646,10 @@ function handleGroundCollision(){
     if (!shotEvaluated){
       shotEvaluated = true;
       showMessage('MISSED SHOT', '#ff4040');
+      // ── break combo on a miss ─────────────────────
+      streakCount  = 0;
+      streakBasket = null;
+      updateScoreUI();      
     }
   }
 }
@@ -691,6 +700,7 @@ function updateScoreUI(){
   pctEl.textContent      = shotAttempts
     ? ((shotsMade / shotAttempts * 100).toFixed(1) + '%')
     : '0%';
+  streakEl.textContent  = streakCount;
 }
 
 function showMessage(txt, color){
@@ -730,27 +740,35 @@ function checkScore(){
       const startDist = Math.hypot(startDx, startDz);
       const pts = (startDist > THREE_PT_RADIUS + THREE_PT_EPS) ? 3 : 2;
 
-      if (isHome) homeScore += pts; else awayScore += pts;
-      totalScore += pts;
+      /* ----- combo logic ---------------------------------------------------- */
+      const basket = isHome ? 'home' : 'away';
+
+      if (streakBasket === basket){
+        streakCount += 1;              // extend streak
+      }else{
+        streakCount  = 1;              // new streak starts
+        streakBasket = basket;
+      }
+      const bonus    = Math.max(0, streakCount - 1); // +1 per extra link
+      const totalPts = pts + bonus;                  // base 2/3 pts + bonus
+
+      /* ----- apply score ---------------------------------------------------- */
+      if (isHome) homeScore += totalPts; else awayScore += totalPts;
+      totalScore += totalPts;
       shotsMade  += 1;
 
       shotEvaluated = true;
       updateScoreUI();
-      showMessage(`${isHome ? 'HOME' : 'AWAY'} ${pts}PT!`, '#40ff40');
+
+      /* ----- feedback ------------------------------------------------------- */
+      const txt = `${basket.toUpperCase()} ${pts}PT` +
+                  (bonus ? ` +${bonus}🔥` : '');
+      showMessage(txt, bonus ? '#ffa500' : '#40ff40');
       return;
+
     }
   }
 }
-
-
-
-// // Animation loop
-// function animate() {
-//   requestAnimationFrame(animate);
-//   controls.enabled = isOrbitEnabled;
-//   controls.update();
-//   renderer.render(scene, camera);
-// }
 
 let lastT = performance.now();
 
