@@ -578,9 +578,12 @@ function handleBackboardCollision(){
           zAbs <= bb.userData.halfW + RADIUS){
 
         // push ball out of the plane
+        // const penetration = RADIUS - dist;
+        // ball.position.addScaledVector(n, penetration + 0.001);
         const penetration = RADIUS - dist;
+        if (penetration > 0) {
         ball.position.addScaledVector(n, penetration + 0.001);
-
+        }
         // reflect velocity with energy loss
         reflectVelocity(vel, n, BACKBOARD_RESTITUTION);
       }
