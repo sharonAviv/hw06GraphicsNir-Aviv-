@@ -254,19 +254,15 @@ camera.applyMatrix4(cameraTranslate);
 const controls = new OrbitControls(camera, renderer.domElement);
 let isOrbitEnabled = true;
 
-// UI instructions
-const instructionsElement = document.createElement('div');
-instructionsElement.style.position = 'absolute';
-instructionsElement.style.bottom = '20px';
-instructionsElement.style.left = '20px';
-instructionsElement.style.color = 'white';
-instructionsElement.style.fontSize = '16px';
-instructionsElement.style.fontFamily = 'Arial, sans-serif';
+// UI instructions  ──────────────────────────────────────────────
+const instructionsElement = document.getElementById('controls-ui');
 instructionsElement.innerHTML = `
   <h3>Controls:</h3>
-  <p>O - Toggle orbit camera</p>
-`;
-document.body.appendChild(instructionsElement);
+  <p>
+    ←/→  : move left/right<br>
+    ↑/↓  : move forward/back<br>
+    O    : toggle orbit camera
+  </p>`;
 
 // Keyboard toggle
 document.addEventListener('keydown', (e) => {
@@ -338,6 +334,23 @@ ball.castShadow = true;
 ball.position.set(0, 2*RADIUS -0.01 , 0);
 scene.add(ball);
 
+// --- court extents -------------------------------------------------------
+const COURT_HALF_LEN   = 15;    // along X
+const COURT_HALF_WIDTH = 7.5;   // along Z
+
+// === Phase-1 movement state  --------------------------------------------
+const COURT_BOUNDS = {
+  xMin: -COURT_HALF_LEN   + RADIUS,
+  xMax:  COURT_HALF_LEN   - RADIUS,
+  zMin: -COURT_HALF_WIDTH + RADIUS,
+  zMax:  COURT_HALF_WIDTH - RADIUS
+};
+
+const MOVE_SPEED   = 4;   // metres / second  (court units are metres)
+const LERP_FACTOR  = 0.15; // 0-1, higher = snappier
+
+const moveKey = { left:false, right:false, up:false, down:false };
+let   ballVel = new THREE.Vector3();         // smoothed velocity
 
 
 /* ----------------------------------------------------------------------- */
@@ -357,18 +370,75 @@ document.addEventListener('keydown', e => {
   }
 });
 
+// === Ball Phase-2 movement logic ===
+function onKeyChange(e, isDown){
+  switch (e.key){
+    case 'ArrowLeft' : moveKey.left  = isDown; break;
+    case 'ArrowRight': moveKey.right = isDown; break;
+    case 'ArrowUp'   : moveKey.up    = isDown; break;
+    case 'ArrowDown' : moveKey.down  = isDown; break;
+    case 'o': case 'O':
+      if (isDown){ isOrbitEnabled = !isOrbitEnabled; }
+      break;
+  }
+  // Stop the browser or OrbitControls from swallowing the arrow keys
+  if (/Arrow/.test(e.key)) e.preventDefault();
+}
+
+window.addEventListener('keydown', e => onKeyChange(e, true ));
+window.addEventListener('keyup'  , e => onKeyChange(e, false));
+
+
 // placeholder: whenever you change score in future, call this helper
 function setScore(val){
   document.getElementById('home-score').textContent = val;
 }
 
 
-// Animation loop
+// // Animation loop
+// function animate() {
+//   requestAnimationFrame(animate);
+//   controls.enabled = isOrbitEnabled;
+//   controls.update();
+//   renderer.render(scene, camera);
+// }
+
+let lastT = performance.now();
+
 function animate() {
   requestAnimationFrame(animate);
+
+  /* ---- delta-time ---------------------------------------------------- */
+  const now = performance.now();
+  const dt  = (now - lastT) / 1000;   // seconds
+  lastT     = now;
+
+  /* ---- Phase-1 ball movement ---------------------------------------- */
+  // 1. desired direction from keys
+  const dir = new THREE.Vector3(
+      (moveKey.right ? 1 : 0) - (moveKey.left ? 1 : 0),
+      0,
+      (moveKey.down  ? 1 : 0) - (moveKey.up   ? 1 : 0)
+  );
+
+  // 2. turn it into a target velocity
+  if (dir.lengthSq() > 0) dir.normalize().multiplyScalar(MOVE_SPEED);
+
+  // 3. smooth-step (LERP) current velocity toward the target
+  ballVel.lerp(dir, LERP_FACTOR);
+
+  // 4. integrate position
+  ball.position.addScaledVector(ballVel, dt);
+
+  // 5. boundary-clamp so the ball never leaves the wood
+  ball.position.x = THREE.MathUtils.clamp(ball.position.x,
+                                          COURT_BOUNDS.xMin, COURT_BOUNDS.xMax);
+  ball.position.z = THREE.MathUtils.clamp(ball.position.z,
+                                          COURT_BOUNDS.zMin, COURT_BOUNDS.zMax);
+
+  /* ---- camera controls & render ------------------------------------- */
   controls.enabled = isOrbitEnabled;
   controls.update();
   renderer.render(scene, camera);
 }
-
 animate();
