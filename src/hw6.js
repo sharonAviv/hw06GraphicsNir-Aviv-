@@ -1,5 +1,7 @@
 import { OrbitControls } from './OrbitControls.js'
 const hoopRims   = [];              // filled from createHoop()
+const backboards = [];                 // filled in createHoop()
+
 const scene = new THREE.Scene();
 const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
 
@@ -214,6 +216,16 @@ function createHoop(xOffset) {
   backboard.position.set(armEndX, yHeight, 0);
   backboard.castShadow = true;
   scene.add(backboard);
+  backboards.push(backboard);
+  backboard.userData.halfW  = backboard.geometry.parameters.width  * 0.5;
+  backboard.userData.halfH  = backboard.geometry.parameters.height * 0.5;
+  // backboard.userData.normal = new THREE.Vector3(Math.sign(-direction), 0, 0); // faces court
+  backboard.userData.normal = new THREE.Vector3(direction, 0, 0).normalize();
+
+
+
+  
+
 
   //
   // RIM
@@ -395,7 +407,21 @@ let   vel        = new THREE.Vector3();     // live velocity during flight
 
 /* ----------------------------------------------------------------------- */
 
+/* ── Phase-4 collision params ───────────────────────────────────────── */
+const GROUND_Y            = 2 * RADIUS;   // ball just touches floor
+const GROUND_RESTITUTION  = 0.58;  // ↑ bouncier, ↓ deader
+const FLOOR_FRICTION      = 0.82;  // ↓ more sliding, ↑ more immediate stop
+const RIM_RESTITUTION     = 0.45;  // ↑ more spring off rim
+const STOP_EPS            = 0.15;  // ↓ stops sooner
+const BACKBOARD_RESTITUTION = 0.35;    // tune as you like
 
+
+// Small helper to reflect velocity about a normal with some energy loss
+function reflectVelocity(v, normal, restitution){
+  const vn = v.dot(normal);
+  if (vn >= 0) return; // moving away, no reflection
+  v.addScaledVector(normal, -(1 + restitution) * vn);
+}
 
 // === extra UI hooks ===
 const scoreBox   = document.getElementById('score-ui');
@@ -462,6 +488,105 @@ function shootBall(){
   inFlight = true;
 }
 
+function handleRimCollision(){
+  // quick exit if we're far below/above rims
+  // (optional but saves checks)
+  for (const rim of hoopRims){
+    const rimPos  = rim.position;
+    const majorR  = rim.geometry.parameters.radius; // torus ring radius
+    const tubeR   = rim.geometry.parameters.tube;   // torus thickness
+
+    // Horizontal distance from rim center axis
+    const dx = ball.position.x - rimPos.x;
+    const dz = ball.position.z - rimPos.z;
+    const horizDist = Math.hypot(dx, dz);
+
+    // Distance to the ideal ring circle (in XZ)
+    const distToRing = Math.abs(horizDist - majorR);
+
+    // Vertical distance between ball center and rim plane
+    const dy = Math.abs(ball.position.y - rimPos.y);
+
+    // Effective collision radius = tube thickness + ball radius
+    const hitRadius = tubeR + RADIUS;
+
+    // Collide if we are near ring circle in XZ and near rim plane in Y
+    if (distToRing < hitRadius && dy < hitRadius){
+      // Find nearest point on ring circle to the ball in XZ:
+      // (project ball horizontally, clamp radius to majorR)
+      if (horizDist === 0) continue; // avoid NaN
+      const nx = dx / horizDist;
+      const nz = dz / horizDist;
+      const nearest = new THREE.Vector3(
+        rimPos.x + nx * majorR,
+        rimPos.y,
+        rimPos.z + nz * majorR
+      );
+
+      const normal = new THREE.Vector3().subVectors(ball.position, nearest).normalize();
+
+      // Push ball out of penetration
+      const penetration = hitRadius - new THREE.Vector3().subVectors(ball.position, nearest).length();
+      if (penetration > 0){
+        ball.position.addScaledVector(normal, penetration + 0.001);
+      }
+
+      // Reflect velocity with rim restitution
+      reflectVelocity(vel, normal, RIM_RESTITUTION);
+    }
+  }
+}
+
+function handleGroundCollision(){
+  if (ball.position.y < GROUND_Y && vel.y < 0){
+    ball.position.y = GROUND_Y;
+
+    // bounce up
+    vel.y = -vel.y * GROUND_RESTITUTION;
+
+    // horizontal energy loss (friction)
+    vel.x *= FLOOR_FRICTION;
+    vel.z *= FLOOR_FRICTION;
+
+    // stop completely if we're basically still
+    if (vel.length() < STOP_EPS){
+      vel.set(0,0,0);
+      inFlight = false;
+    }
+  }
+}
+
+function handleBackboardCollision(){
+  for (const bb of backboards){
+    const n = bb.userData.normal;              // board outward normal
+    // signed distance of ball center from plane
+    // const dist = n.dot(ball.position) - n.dot(bb.position);
+    const dist = new THREE.Vector3().subVectors(ball.position, bb.position).dot(n);
+
+    // we only care when penetrating the plane (dist < RADIUS) and moving into it
+    // if (dist < RADIUS && vel.dot(n) < 0){
+    if (dist <= RADIUS && dist >= -RADIUS && vel.dot(n) < 0){ 
+      // Check if ball is within board rectangle (project on two in-plane axes)
+      const up = new THREE.Vector3(0,1,0);               // board is vertical
+      const right = new THREE.Vector3().crossVectors(up, n).normalize();
+
+      const rel   = new THREE.Vector3().subVectors(ball.position, bb.position);
+      const yAbs  = Math.abs(rel.dot(up));
+      const zAbs  = Math.abs(rel.dot(right));            // horizontal along board
+
+      if (yAbs <= bb.userData.halfH + RADIUS &&
+          zAbs <= bb.userData.halfW + RADIUS){
+
+        // push ball out of the plane
+        const penetration = RADIUS - dist;
+        ball.position.addScaledVector(n, penetration + 0.001);
+
+        // reflect velocity with energy loss
+        reflectVelocity(vel, n, BACKBOARD_RESTITUTION);
+      }
+    }
+  }
+}
 
 // // Animation loop
 // function animate() {
@@ -487,12 +612,16 @@ if (inFlight) {
   vel.y += GRAVITY * dt;                  // constant downward g
   ball.position.addScaledVector(vel, dt);
 
-  /* ---- simple ground stop ---------------------------------------- */
-  if (ball.position.y <= 2 * RADIUS) {
-    ball.position.y = 2 * RADIUS;
-    inFlight = false;
-    vel.set(0, 0, 0);                     // ready for next dribble / shot
-  }
+  // rim collision (before ground so we don't miss hits)
+  handleRimCollision();
+  
+  handleBackboardCollision();
+
+  // ground collision + bounce
+  handleGroundCollision();                   // ready for next dribble / shot
+
+
+
 
 } else {
   /* ---- Phase-1 planar movement ----------------------------------- */
