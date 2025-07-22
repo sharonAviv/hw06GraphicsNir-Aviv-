@@ -427,6 +427,8 @@ let shotsMade     = 0;
 let shotEvaluated = false;   // per-shot flag
 let streakCount  = 0;           // 0 = no active streak
 let streakBasket = null;        // 'home' | 'away
+let hitRimThisShot = false;  // TRUE once the rim is touched during current shot
+const SWISH_BONUS  = 1;      // +1 for a perfect swish
 // track arc-crossing per shot
 let shotPassedRimPlane = false;  // becomes true once centre rises above rim
 let targetRimY         = 0;      // the rim-plane Y for this shot
@@ -548,6 +550,7 @@ function shootBall(){
     ball.position.distanceTo(rim.position) <
     ball.position.distanceTo(closest.position) ? rim : closest);
     shotStartPos.copy(ball.position);
+    hitRimThisShot = false;          // fresh shot → assume swish until proven otherwise
     shotTargetRim = target;
     // store rim height for arc test
     targetRimY         = target.position.y;
@@ -600,6 +603,9 @@ function handleRimCollision(){
 
     // Collide if we are near ring circle in XZ and near rim plane in Y
     if (distToRing < hitRadius && dy < hitRadius){
+
+      hitRimThisShot = true;          // not a swish anymore  ← NEW LINE
+
       // Find nearest point on ring circle to the ball in XZ:
       // (project ball horizontally, clamp radius to majorR)
       if (horizDist === 0) continue; // avoid NaN
@@ -611,10 +617,15 @@ function handleRimCollision(){
         rimPos.z + nz * majorR
       );
 
-      const normal = new THREE.Vector3().subVectors(ball.position, nearest).normalize();
+      const normal = new THREE.Vector3()
+                      .subVectors(ball.position, nearest)
+                      .normalize();
 
       // Push ball out of penetration
-      const penetration = hitRadius - new THREE.Vector3().subVectors(ball.position, nearest).length();
+      const penetration = hitRadius -
+              new THREE.Vector3()
+                .subVectors(ball.position, nearest)
+                .length();
       if (penetration > 0){
         ball.position.addScaledVector(normal, penetration + 0.001);
       }
@@ -750,7 +761,8 @@ function checkScore(){
         streakBasket = basket;
       }
       const bonus    = Math.max(0, streakCount - 1); // +1 per extra link
-      const totalPts = pts + bonus;                  // base 2/3 pts + bonus
+      const swishBonus = hitRimThisShot ? 0 : SWISH_BONUS;   // NEW
+      const totalPts   = pts + bonus + swishBonus;           // base + combo + swish
 
       /* ----- apply score ---------------------------------------------------- */
       if (isHome) homeScore += totalPts; else awayScore += totalPts;
@@ -762,8 +774,11 @@ function checkScore(){
 
       /* ----- feedback ------------------------------------------------------- */
       const txt = `${basket.toUpperCase()} ${pts}PT` +
-                  (bonus ? ` +${bonus}🔥` : '');
-      showMessage(txt, bonus ? '#ffa500' : '#40ff40');
+                  (bonus      ? ` +${bonus}🔥`  : '') +
+                  (swishBonus ? ' SWISH✨'      : '');
+      showMessage(txt, swishBonus ? '#00d9ff'
+                                  : (bonus ? '#ffa500' : '#40ff40'));
+
       return;
 
     }
