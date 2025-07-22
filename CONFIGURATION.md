@@ -6,7 +6,7 @@
 
 ## Project Structure
 - WebGL 3D graphics application using THREE.js
-- Scene implementation in `/src/hw5.js`
+- Scene implementation in `/src/hw6.js`
 - OrbitControls for camera manipulation
 
 ## Code Style Guidelines
