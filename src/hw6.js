@@ -415,6 +415,24 @@ const RIM_RESTITUTION     = 0.45;  // ↑ more spring off rim
 const STOP_EPS            = 0.15;  // ↓ stops sooner
 const BACKBOARD_RESTITUTION = 0.35;    // tune as you like
 
+/* ── Phase-5 rotation params ────────────────────────────────────────── */
+let   spinAxis   = new THREE.Vector3(1,0,0);   // arbitrary non-zero default
+let   spinSpeed  = 0;                          // rad / s  (signed)
+const MIN_SPEED  = 0.05;                       // m/s →  no visible roll
+
+function syncSpinWithVelocity(v){
+  const speed = v.length();
+  if (speed < MIN_SPEED) return;               // nothing to do
+
+  /* axis = perpendicular to motion, lying in XZ so the ball “rolls” */
+  const axis = new THREE.Vector3(-v.z, 0, v.x).normalize();
+  spinAxis.copy(axis);
+
+  /* for pure rolling contact   ω = v / R */
+  spinSpeed = speed / RADIUS;
+}
+
+
 
 // Small helper to reflect velocity about a normal with some energy loss
 function reflectVelocity(v, normal, restitution){
@@ -486,6 +504,8 @@ function shootBall(){
   vel.y = vVert;
 
   inFlight = true;
+  syncSpinWithVelocity(vel);   // start spin immediately
+
 }
 
 function handleRimCollision(){
@@ -551,6 +571,7 @@ function handleGroundCollision(){
     // stop completely if we're basically still
     if (vel.length() < STOP_EPS){
       vel.set(0,0,0);
+      spinSpeed = 0;
       inFlight = false;
     }
   }
@@ -614,7 +635,11 @@ if (inFlight) {
   /* ---- airborne: integrate parabolic flight ---------------------- */
   vel.y += GRAVITY * dt;                  // constant downward g
   ball.position.addScaledVector(vel, dt);
-
+  syncSpinWithVelocity(vel);
+  if (spinSpeed !== 0){
+    const angle = spinSpeed * dt;                // Δθ
+    ball.rotateOnWorldAxis(spinAxis, -angle);
+  }
   // rim collision (before ground so we don't miss hits)
   handleRimCollision();
   
@@ -637,6 +662,11 @@ if (inFlight) {
   if (dir.lengthSq() > 0) dir.normalize().multiplyScalar(MOVE_SPEED);
   ballVel.lerp(dir, LERP_FACTOR);
   ball.position.addScaledVector(ballVel, dt);
+  syncSpinWithVelocity(ballVel);
+  if (spinSpeed !== 0){
+    const angle = - spinSpeed * dt;                // Δθ
+    ball.rotateOnWorldAxis(spinAxis, angle);
+  }
 
   /* ---- Phase-2 power adjustment ---------------------------------- */
   if (powerKey.up)   shotPower += POWER_STEP * dt;
