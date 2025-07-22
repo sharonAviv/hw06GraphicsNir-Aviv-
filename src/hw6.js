@@ -805,8 +805,18 @@ if (inFlight) {
     const angle = spinSpeed * dt;                // Δθ
     ball.rotateOnWorldAxis(spinAxis, -angle);
   }
-  if (!shotPassedRimPlane && ball.position.y > targetRimY + RADIUS) {
-  shotPassedRimPlane = true;
+  if (!shotPassedRimPlane &&
+      ball.position.y > targetRimY + RADIUS) {
+
+    // Only count if the ball is horizontally inside the ring cylinder
+    const dx = ball.position.x - shotTargetRim.position.x;
+    const dz = ball.position.z - shotTargetRim.position.z;
+    const innerR = shotTargetRim.geometry.parameters.radius -
+                  shotTargetRim.geometry.parameters.tube;
+
+    if (dx*dx + dz*dz < innerR*innerR){
+      shotPassedRimPlane = true;    // armed → a proper down-through can now score
+    }
   }
   checkScore();
   // rim collision (before ground so we don't miss hits)
