@@ -1,5 +1,5 @@
 import { OrbitControls } from './OrbitControls.js'
-
+const hoopRims   = [];              // filled from createHoop()
 const scene = new THREE.Scene();
 const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
 
@@ -225,6 +225,7 @@ function createHoop(xOffset) {
   rim.position.set(armEndX + direction * rimOffset * 7, yHeight - 0.15, 0);
   rim.castShadow = true;
   scene.add(rim);
+  hoopRims.push(rim);        // ⇐ track for nearest-hoop lookup
 
   //
   // NET (8 segments)
@@ -262,7 +263,31 @@ instructionsElement.innerHTML = `
     ←/→  : move left/right<br>
     ↑/↓  : move forward/back<br>
     O    : toggle orbit camera
+    <br>SPACE : shoot toward rim
   </p>`;
+
+// ── UI: power indicator ────────────────────────────────────────────────
+const powerWrap  = document.createElement('div');
+powerWrap.style.marginTop = '8px';
+
+const label      = document.createElement('span');
+label.textContent = 'Power 0%  ';
+powerWrap.appendChild(label);
+
+const barOuter   = document.createElement('div');
+barOuter.style.cssText = `
+   display:inline-block; width:120px; height:12px;
+   background:#444; border:1px solid #999; border-radius:4px;
+`;
+const barInner   = document.createElement('div');
+barInner.style.cssText = `
+   height:100%; width:0%; background:#28a745; border-radius:3px;
+`;
+barOuter.appendChild(barInner);
+powerWrap.appendChild(barOuter);
+
+instructionsElement.appendChild(powerWrap);
+
 
 // Keyboard toggle
 document.addEventListener('keydown', (e) => {
@@ -352,6 +377,21 @@ const LERP_FACTOR  = 0.15; // 0-1, higher = snappier
 const moveKey = { left:false, right:false, up:false, down:false };
 let   ballVel = new THREE.Vector3();         // smoothed velocity
 
+/* ── Phase-2 shot-power state ────────────────────────────────────────── */
+let   shotPower   = 0;    // 0 … 1   (0-100 %)
+const POWER_STEP  = 0.4;  // ↑ / ↓ per second while key is held
+const POWER_MIN   = 0;
+const POWER_MAX   = 1;
+
+const powerKey = { up:false, down:false };   // W / S
+const MAX_SHOT_SPEED = 22;   // m/s – used later in Phases 3-5
+function currentShotVelocity() { return shotPower * MAX_SHOT_SPEED; }
+
+/* ── Phase-3 physics state ─────────────────────────────────────────── */
+const GRAVITY = -9.8;               // m · s-2  (court units ≈ metres)  :contentReference[oaicite:0]{index=0}
+
+let   inFlight   = false;           // true once spacebar is pressed
+let   vel        = new THREE.Vector3();     // live velocity during flight
 
 /* ----------------------------------------------------------------------- */
 
@@ -377,8 +417,13 @@ function onKeyChange(e, isDown){
     case 'ArrowRight': moveKey.right = isDown; break;
     case 'ArrowUp'   : moveKey.up    = isDown; break;
     case 'ArrowDown' : moveKey.down  = isDown; break;
-    case 'o': case 'O':
+    case 'w': case 'W': case '\'': powerKey.up   = isDown; break;
+    case 's': case 'S': case 'ד': powerKey.down = isDown; break;
+    case 'o': case 'O': case 'ם':
       if (isDown){ isOrbitEnabled = !isOrbitEnabled; }
+      break;
+    case ' ':                 // SPACE
+      if (isDown && !inFlight)   shootBall();
       break;
   }
   // Stop the browser or OrbitControls from swallowing the arrow keys
@@ -392,6 +437,29 @@ window.addEventListener('keyup'  , e => onKeyChange(e, false));
 // placeholder: whenever you change score in future, call this helper
 function setScore(val){
   document.getElementById('home-score').textContent = val;
+}
+
+function shootBall(){
+  /* ----  pick nearest hoop  ---------------------------------------- */
+  const target = hoopRims.reduce((closest, rim) =>
+    ball.position.distanceTo(rim.position) <
+    ball.position.distanceTo(closest.position) ? rim : closest);
+
+  /* ----  build initial velocity  ----------------------------------- */
+  const vTot   = currentShotVelocity();   // uses Phase-2 shotPower
+
+  const theta  = THREE.MathUtils.degToRad(50);  // launch angle (~ NBA average)
+  const horDir = new THREE.Vector3().subVectors(target.position, ball.position);
+  horDir.y = 0;
+  horDir.normalize();
+
+  const vHor   = vTot * Math.cos(theta);
+  const vVert  = vTot * Math.sin(theta);
+
+  vel.copy(horDir).multiplyScalar(vHor);
+  vel.y = vVert;
+
+  inFlight = true;
 }
 
 
@@ -413,28 +481,47 @@ function animate() {
   const dt  = (now - lastT) / 1000;   // seconds
   lastT     = now;
 
-  /* ---- Phase-1 ball movement ---------------------------------------- */
-  // 1. desired direction from keys
+/* ───────────────── update physics / input ────────────────────────── */
+if (inFlight) {
+  /* ---- airborne: integrate parabolic flight ---------------------- */
+  vel.y += GRAVITY * dt;                  // constant downward g
+  ball.position.addScaledVector(vel, dt);
+
+  /* ---- simple ground stop ---------------------------------------- */
+  if (ball.position.y <= 2 * RADIUS) {
+    ball.position.y = 2 * RADIUS;
+    inFlight = false;
+    vel.set(0, 0, 0);                     // ready for next dribble / shot
+  }
+
+} else {
+  /* ---- Phase-1 planar movement ----------------------------------- */
   const dir = new THREE.Vector3(
       (moveKey.right ? 1 : 0) - (moveKey.left ? 1 : 0),
       0,
       (moveKey.down  ? 1 : 0) - (moveKey.up   ? 1 : 0)
   );
 
-  // 2. turn it into a target velocity
   if (dir.lengthSq() > 0) dir.normalize().multiplyScalar(MOVE_SPEED);
-
-  // 3. smooth-step (LERP) current velocity toward the target
   ballVel.lerp(dir, LERP_FACTOR);
-
-  // 4. integrate position
   ball.position.addScaledVector(ballVel, dt);
 
-  // 5. boundary-clamp so the ball never leaves the wood
+  /* ---- Phase-2 power adjustment ---------------------------------- */
+  if (powerKey.up)   shotPower += POWER_STEP * dt;
+  if (powerKey.down) shotPower -= POWER_STEP * dt;
+  shotPower = THREE.MathUtils.clamp(shotPower, POWER_MIN, POWER_MAX);
+
+  const pct = Math.round(shotPower * 100);
+  label.textContent    = `Power ${pct}%  `;
+  barInner.style.width = `${pct}%`;
+
+  /* ---- keep ball on the court ------------------------------------ */
   ball.position.x = THREE.MathUtils.clamp(ball.position.x,
                                           COURT_BOUNDS.xMin, COURT_BOUNDS.xMax);
   ball.position.z = THREE.MathUtils.clamp(ball.position.z,
                                           COURT_BOUNDS.zMin, COURT_BOUNDS.zMax);
+}
+
 
   /* ---- camera controls & render ------------------------------------- */
   controls.enabled = isOrbitEnabled;
