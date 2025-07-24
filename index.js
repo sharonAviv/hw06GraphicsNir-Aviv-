@@ -13,6 +13,8 @@ const port = 8000
 
 app.use("/src", express.static(__dirname + "/src"));
 
+app.use("/assets", express.static(path.join(__dirname, "assets")));
+
 app.get('/', (req, res) => {
     res.sendFile(path.join(__dirname, '/index.html'));
   })

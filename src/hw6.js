@@ -689,6 +689,7 @@ function handleRimCollision(){
 
       // Reflect velocity with rim restitution
       reflectVelocity(vel, normal, RIM_RESTITUTION);
+      playSfx(SFX.bounce);
     }
   }
 }
@@ -699,6 +700,7 @@ function handleGroundCollision(){
 
     // bounce up
     vel.y = -vel.y * GROUND_RESTITUTION;
+    playSfx(SFX.bounce); 
 
     // horizontal energy loss (friction)
     vel.x *= FLOOR_FRICTION;
@@ -754,6 +756,7 @@ function handleBackboardCollision(){
         }
         // reflect velocity with energy loss
         reflectVelocity(vel, n, BACKBOARD_RESTITUTION);
+        playSfx(SFX.bounce);  
       }
     }
   }
