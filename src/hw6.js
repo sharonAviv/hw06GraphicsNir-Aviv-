@@ -1,6 +1,9 @@
 import { OrbitControls } from './OrbitControls.js'
 const hoopRims   = [];              // filled from createHoop()
 const backboards = [];                 // filled in createHoop()
+const trailPoints = [];
+const trailMax    = 40;  // number of segments to store (~0.5–1.5s)
+let   trailLine   = null;
 
 const scene = new THREE.Scene();
 const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
@@ -369,7 +372,21 @@ const mat = new THREE.MeshStandardMaterial({
 const ball = new THREE.Mesh(geo, mat);
 ball.castShadow = true;
 ball.position.set(0, 2*RADIUS -0.01 , 0);
-scene.add(ball);
+
+// 🟠 Add trail AFTER ball is created, but BEFORE adding to scene
+const trailGeo = new THREE.BufferGeometry().setFromPoints(
+  Array(trailMax).fill(ball.position.clone())
+);
+const trailMat = new THREE.LineBasicMaterial({
+  color: 0xffa000,
+  transparent: true,
+  opacity: 0.6,
+  linewidth: 5
+});
+trailLine = new THREE.Line(trailGeo, trailMat);
+scene.add(trailLine);
+
+scene.add(ball);  // ← now the ball is added too
 
 // --- court extents -------------------------------------------------------
 const COURT_HALF_LEN   = 15;    // along X
@@ -574,6 +591,10 @@ function shootBall(){
   shotEvaluated = false;
 
   inFlight = true;
+  trailPoints.length = 0; // clear previous trail
+  for (let i = 0; i < trailMax; i++) {
+    trailPoints.push(ball.position.clone());
+  }
   syncSpinWithVelocity(vel);   // start spin immediately
   shotPassedRimPlane = false
 
@@ -652,6 +673,8 @@ function handleGroundCollision(){
       vel.set(0,0,0);
       spinSpeed = 0;
       inFlight = false;
+      trailPoints.length = 0;
+      trailLine.geometry.setFromPoints([]);
     }
 
     if (!shotEvaluated){
@@ -800,6 +823,10 @@ if (inFlight) {
   /* ---- airborne: integrate parabolic flight ---------------------- */
   vel.y += GRAVITY * dt;                  // constant downward g
   ball.position.addScaledVector(vel, dt);
+  // update trail
+  trailPoints.shift();                          // drop oldest point
+  trailPoints.push(ball.position.clone());      // add current position
+  trailLine.geometry.setFromPoints(trailPoints);
   syncSpinWithVelocity(vel);
   if (spinSpeed !== 0){
     const angle = spinSpeed * dt;                // Δθ
