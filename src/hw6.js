@@ -595,6 +595,7 @@ function onKeyChange(e, isDown){
       break;
     case ' ':                 // SPACE
       if (isDown && !inFlight)   shootBall();
+      e.preventDefault(); 
       break;
   }
   // Stop the browser or OrbitControls from swallowing the arrow keys
@@ -820,6 +821,7 @@ function showBanner(txt){
 function startTimeChallenge(){
   if(inTimeChallenge) return;            // avoid double-start
   inTimeChallenge = true;
+  timeBtn.blur();
 
   // reset scoreboard
   homeScore = 0; awayScore = 0;
