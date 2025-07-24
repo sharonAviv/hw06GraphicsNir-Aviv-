@@ -39,6 +39,21 @@
       font-size:24px;
       font-weight:600;
     }
+    /* ––– time-challenge button ––– */
+    .mode-btn{
+      position:absolute;
+      top:55px;                 /* sits under the black scoreboard strip          */
+      left:50%;
+      transform:translateX(-50%);
+      padding:4px 14px;
+      font-size:14px;
+      font-weight:600;
+      background:#ff7900;       /* bright orange */
+      color:#fff;
+      border:none;
+      border-radius:8px;
+      cursor:pointer;
+    }
   </style>
 
   <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
@@ -59,7 +74,12 @@
       <span id="away-score" class="score">0</span>
     </div>
   </div>
-  
+  <!-- === mode-switch button (top-centre) === -->
+  <button id="time-challenge-btn" class="mode-btn">Time&nbsp;Challenge</button>
+  <!-- === SOUND FX === -->
+  <audio id="sfx-bounce" src="./assets/sounds/bounce.mp3" preload="auto"></audio>
+  <audio id="sfx-tada" src="./assets/sounds/tada.mp3" preload="auto"></audio>
+
   <!-- === controls instructions overlay (bottom-left) === -->
   <div id="controls-ui"
        style="position:absolute;

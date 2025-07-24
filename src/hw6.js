@@ -438,6 +438,11 @@ let   spinSpeed  = 0;                          // rad / s  (signed)
 const MIN_SPEED  = 0.05;                       // m/s →  no visible roll
 
 /* ── Phase-6 scoring state ────────────────────────────────────────── */
+/* ── time-challenge state ─────────────────────────────────────────── */
+let inTimeChallenge   = false;   // true while the clock is running
+let countdown         = 0;       // seconds remaining
+let countdownInterval = null;
+/*-end-time-challenge state*/
 let totalScore    = 0;
 let shotAttempts  = 0;
 let shotsMade     = 0;
@@ -524,6 +529,24 @@ const controlsUI = document.getElementById('controls-ui');
 const orbitText  = document.getElementById('orbit-status');
 const streakEl   = document.getElementById('score-streak');
 
+/* timer & new-mode UI -------------------------------------------------- */
+const timerEl  = document.getElementById('game-timer');
+const timeBtn  = document.getElementById('time-challenge-btn');
+
+const bannerEl = (()=>{                      // centred end-of-game banner
+  const d = document.createElement('div');
+  Object.assign(d.style,{
+    position:'absolute',top:'50%',left:'50%',
+    transform:'translate(-50%,-50%)',
+    fontSize:'48px',fontWeight:'700',
+    color:'#fff',background:'rgba(0,0,0,0.75)',
+    padding:'20px 40px',borderRadius:'12px',
+    display:'none',zIndex:20
+  });
+  document.body.appendChild(d);
+  return d;
+})();
+
 // update orbit status without touching old instructionsElement
 document.addEventListener('keydown', e => {
   if (e.key === 'o' || e.key === 'O') {
@@ -560,6 +583,19 @@ window.addEventListener('keyup'  , e => onKeyChange(e, false));
 function setScore(val){
   document.getElementById('home-score').textContent = val;
 }
+
+// --- sound effects ----------------------------------------------------
+const SFX = {
+  bounce: document.getElementById('sfx-bounce'),
+  tada  : document.getElementById('sfx-tada')
+};
+
+function playSfx(a){
+  if (!a) return;
+  a.currentTime = 0;
+  a.play().catch(()=>{});
+}
+
 
 function shootBall(){
   /* ----  pick nearest hoop  ---------------------------------------- */
@@ -737,6 +773,58 @@ function updateScoreUI(){
   streakEl.textContent  = streakCount;
 }
 
+/* ––– timer display ––– */
+function updateTimerDisplay(){
+  const m = String(Math.floor(countdown/60)).padStart(2,'0');
+  const s = String(countdown%60).padStart(2,'0');
+  timerEl.textContent = `${m}:${s}`;
+}
+
+/* ––– show winner banner ––– */
+function showBanner(txt){
+  bannerEl.textContent = txt;
+  bannerEl.style.display = 'block';
+  setTimeout(()=>bannerEl.style.display='none', 3000);
+}
+
+/* ––– start & stop the challenge ––– */
+function startTimeChallenge(){
+  if(inTimeChallenge) return;            // avoid double-start
+  inTimeChallenge = true;
+
+  // reset scoreboard
+  homeScore = 0; awayScore = 0;
+  updateScoreUI();
+
+  // init clock
+  countdown = 60;                        // 1-minute round
+  updateTimerDisplay();
+
+  countdownInterval = setInterval(()=>{
+    countdown--;
+    updateTimerDisplay();
+    if(countdown<=0) endTimeChallenge();
+  },1000);
+}
+
+function endTimeChallenge(){
+  clearInterval(countdownInterval);
+  inTimeChallenge = false;
+
+  // decide winner
+  let msg = 'tie game!';
+  if(awayScore>homeScore) msg = 'away wins!';
+  else if(homeScore>awayScore) msg = 'home wins!';
+
+  showBanner(msg.toUpperCase());
+
+  // hard-reset for free-shoot mode
+  homeScore = awayScore = 0;
+  updateScoreUI();
+  countdown  = 0;
+  updateTimerDisplay();
+}
+
 function showMessage(txt, color){
   messageEl.textContent = txt;
   messageEl.style.color = color || '#ffd700';
@@ -794,6 +882,7 @@ function checkScore(){
 
       shotEvaluated = true;
       updateScoreUI();
+      playSfx(SFX.tada); 
 
       /* ----- feedback ------------------------------------------------------- */
       const txt = `${basket.toUpperCase()} ${pts}PT` +
@@ -809,6 +898,9 @@ function checkScore(){
 }
 
 let lastT = performance.now();
+
+/* click → start timed round */
+timeBtn.addEventListener('click', startTimeChallenge);
 
 function animate() {
   requestAnimationFrame(animate);
