@@ -443,6 +443,32 @@ let inTimeChallenge   = false;   // true while the clock is running
 let countdown         = 0;       // seconds remaining
 let countdownInterval = null;
 /*-end-time-challenge state*/
+/* ── LEADERBOARD (localStorage, 20 entries) ─────────────────────────── */
+const LB_KEY = 'hw6_leaderboard';          // storage slot name
+const LB_SIZE = 20;                        // keep only best 20 scores
+
+function loadLB(){
+  const raw = localStorage.getItem(LB_KEY) || '';
+  return raw ? raw.split(',').map(Number).filter(n=>!isNaN(n)) : [];
+}
+function saveLB(arr){
+  localStorage.setItem(LB_KEY, arr.join(','));   // ultra-thin CSV
+}
+
+/** insert score, keep sorted-desc, trim to LB_SIZE.
+    @return {number} 1-based rank (or −1 if outside Top-10) */
+function recordScore(score){
+  if (score <= 0) return -1;
+  const lb = loadLB();
+  lb.push(score);
+  lb.sort((a,b)=>b-a);
+  const rank = lb.indexOf(score) + 1;      // first occurrence
+  if (lb.length > LB_SIZE) lb.length = LB_SIZE;
+  saveLB(lb);
+  return (rank && rank <= 10) ? rank : -1;
+}
+
+
 let totalScore    = 0;
 let shotAttempts  = 0;
 let shotsMade     = 0;
@@ -820,6 +846,14 @@ function endTimeChallenge(){
   else if(homeScore>awayScore) msg = 'home wins!';
 
   showBanner(msg.toUpperCase());
+
+  /* === leaderboard update ====================================== */
+  const roundScore = totalScore;          // total points this minute
+  const rank = recordScore(roundScore);   // −1 if not in Top-10
+  if (rank > 0){
+    // wait a moment so it appears after the WIN banner fades
+    setTimeout(()=>showBanner(`NUMBER ${rank} IN LEADERBOARD!`), 3100);
+  }
 
   // hard-reset for free-shoot mode
   homeScore = awayScore = 0;
